@@ -48,41 +48,13 @@ tauslope2[s] <- pow(1.3, -2) # Northrup and Gerber 2018 prior for logit regressi
 b1[s] ~ dnorm(0, tauslope2[s]) # beta coefficient for direct recovery of AHY 
 }
 
-# # Priors for temp rand eff:
-# for (t in 1:(n.years)){                                            
-#      et.hr[t] ~ dnorm(0, tau.tt[1])
-#      et.f[t] ~ dnorm(0, tau.tt[2])
-# } # t
-# 
-# # Priors for within site temp rand eff:
-# for(s in 1:(n.strata)){
-# for (t in 1:(n.years)){                                            
-#       ets.hr[s,t] ~ dnorm(0, tau.ts[1])
-#       ets.f[s,t] ~ dnorm(0, tau.ts[2])
-# } # t nyears for fecundity
-# } # s
-# 
-# 
-# # Priors for precisions
-#      for (i in 1:2){
-#         tau.tt[i] ~ dgamma(0.001, 0.001)
-#         tau.ts[i] ~ dgamma(0.001, 0.001)
-#         
-#         # Variances
-#         var.tt[i] <- 1 / tau.tt[i]
-#         var.ts[i] <- 1 / tau.ts[i]
-# 
-#         # Intraclass correlation 
-#         ICC[i] <- var.tt[i] / ( var.tt[i] + var.ts[i])
-#         } # i
 
 
 
 # mortality hazard rates
 for(s in 1:(n.strata)){
 for (t in 1:(n.years)){
-     log(hr[s,t]) <- alpha0 + lin.alpha.s[s] + betat[t] + beta[s,t]     # with random time effect
-  #  log(hr[s,t]) <- meanhr[s] + et.hr[t] + ets.hr[s,t]     # ECM NEW FOR SYNCHRONY CALC: mean + temp rand eff + within site temp ran eff
+     log(hr[s,t]) <- alpha0 + lin.alpha.s[s] + betat[t] + beta[s,t]     
 }
      log(hrmean[s]) <- alpha0 + lin.alpha.s[s]     # mean hazard for stratum s
  }
@@ -90,16 +62,14 @@ for (t in 1:(n.years)){
 
 # use strong prior on survival and transform to hazard scale
 mu.band<-0.957
-sd.band<-0.1                     ## ECM changed this from 0.005 to 0.1 on May 27 2024
+sd.band<-0.1                     
 alpha.band<- ((mu.band^2)-(mu.band^3)-(mu.band*sd.band^2))/sd.band^2
 beta.band<- (mu.band-(2*mu.band^2)+(mu.band^3)-(sd.band^2)+(mu.band*sd.band^2))/sd.band^2
 band_surv ~ dbeta(alpha.band, beta.band)
 alpha0 <-log(-log(band_surv))
 
-# # Mean intercept per stratum
-# for (s in 1:n.strata){
-#   meanhr[s] ~ dnorm(alpha0, 0.001)
-# } 
+
+
 
 
 # weakly informative prior on the hazard scale for the offset for each stratum
@@ -131,6 +101,7 @@ tau.year <- 1/ sig.year^2
 # beta[s,n.years]<-0 # use this for fixed effect and make for loop 1:n.years-1
 
 
+# Intraclass correlation in survival
 ICC[1] <- sig.year.betat^2 / ((sig.year.betat^2) + (sig.year^2))
 
 
@@ -170,17 +141,21 @@ for (s in 1:(n.strata)){
  # convert SD to precision (tau) by inverting and squaring
  b0.tau <- pow(b0.sigma,-2)
 
- # priors for random year and banding location (site) effects
- eta.yr.sigma ~ dunif(0,5)
+ # priors for random year, year within stratum, and banding location (site) effects
  eta.site.sigma ~ dunif(0,5)
- eta.yr.tau <- pow(eta.yr.sigma,-2)
+ eta.strat.sigma ~ dunif(0,5)
+ eta.yr.sigma ~ dunif(0,5)
  eta.site.tau <- pow(eta.site.sigma,-2)
+ eta.strat.tau <- pow(eta.strat.sigma,-2)
+ eta.yr.tau <- pow(eta.yr.sigma,-2)
 
  for (s in 1:n.strata){ # where s indexes to the maximum number of strata
  b0[s] ~ dnorm(b0.mu, b0.tau) # generate stratum-specific regression coefficients
 
  for (t in 1:n.years){ # where t indexes to number of years surveyed in each stratum
- eta.yr[s,t] ~ dnorm(0,eta.yr.tau) # generate random year effects within each stratum
+ eta.yr[t] ~ dnorm(0,eta.yr.tau) # generate random year effects 
+ 
+ eta.strat[s,t] ~ dnorm(0,eta.strat.tau) # generate random year effects within each stratum
 
  for (k in 1:maxsites){ # where k indexes to the maximum number of banding sites
  eta.site[s,t,k] ~ dnorm(0,eta.site.tau) # generate random banding site effects
@@ -188,7 +163,8 @@ for (s in 1:(n.strata)){
  } # close years loop
  } # close strata loop
 
-ICC[2] <- eta.yr.sigma^2 / ((eta.yr.sigma^2) + (eta.site.sigma^2))
+# Intraclass correlation for fecundity
+ICC[2] <- eta.yr.sigma^2 / ((eta.yr.sigma^2) + (eta.strat.sigma^2))
 
 
 
@@ -251,27 +227,37 @@ for(t in 1:n.years){
 # 2.2 The likelihoods of the Seber model m-array data sets
 #-------------------------------------------------
 
+### Code for looping over years with no band releases
+rel_a_ind = which(relAHYf !=0, arr.ind=T) # indices of rows (column 1) and columns (column 2) in m-array that HAVE data
+rel_a_ind_n = nrow(rel_a_ind) # the total number of elements in the m-array with data so you can loop over the ones that don't
 
 # 2.2.1 Define the multinomial likelihood 
-for(s in 1:(n.strata)){
-for (t in 1:(n.years)){
-  marrAHYfH[t,1:(n.years+1),s] ~ dmulti(prAHYfH[t,,s], relAHYfH[t,s]) #band only
-}}
+for(i in 1:rel_a_ind_n){
+  marrAHYf[rel_a_ind[i,1],1:(n.years+1),rel_a_ind[i,2]] ~ dmulti(prAHYf[rel_a_ind[i,1],,rel_a_ind[i,2]],
+                                                          relAHYf[rel_a_ind[i,1],rel_a_ind[i,2]])
+}
+
+
+# # 2.2.1 Define the multinomial likelihood 
+# for(s in 1:(n.strata)){
+# for (t in 1:(n.years)){
+#   marrAHYf[t,1:(n.years+1),s] ~ dmulti(prAHYf[t,,s], relAHYf[t,s])
+# }}
 
 # 2.2.2 Define the cell probabilities of the m-array
 # Main diagonal
 for(s in 1:(n.strata)){
 for (t in 1:(n.years)){
-  prAHYfH[t,t,s] <- (1 - anns[s,t]) * rd[s,t]
+  prAHYf[t,t,s] <- (1 - anns[s,t]) * rd[s,t]
 
   # Above main diagonal
   for (j in (t+1):(n.years)){
-    prAHYfH[t,j,s] <- prod(anns[s,t:(j-1)]) * (1-anns[s,j]) * r[s,j]
+    prAHYf[t,j,s] <- prod(anns[s,t:(j-1)]) * (1-anns[s,j]) * r[s,j]
   } #j
 
   # Below main diagonal
   for (j in 1:(t-1)){
-    prAHYfH[t,j,s] <- 0
+    prAHYf[t,j,s] <- 0
   } #j
  } #t
 } #s
@@ -279,7 +265,7 @@ for (t in 1:(n.years)){
 # Last column: probability of non-recovery
 for(s in 1:(n.strata)){
 for (t in 1:(n.years)){
-  prAHYfH[t,n.years+1,s] <- 1-sum(prAHYfH[t,1:n.years,s])
+  prAHYf[t,n.years+1,s] <- 1-sum(prAHYf[t,1:n.years,s])
 } #t
 } #s
 
@@ -290,12 +276,13 @@ for (t in 1:(n.years)){
 #-------------------------------------------------
 
 # 2.3.1 Observation model
+
  for (i in 1:nrows){ # i indexes each line of data (from a banding site within a year within a stratum)
- # predict proportion of juveniles (Pjuv) based on stratum-specific random covariates,
- # fixed effects (lat, long), and random effects of year/stratum and site/year/stratum
+ # predict proportion of juveniles (Pjuv) based on stratum-specific random intercepts,
+ # fixed effects (lat, long), and random effects of year, year/stratum and site/year/stratum
  
- logit(Pjuv[i]) <- b0[stratum[i]] + b1.mu*Lat[i] + b2.mu*Long[i] + 
-                   eta.yr[stratum[i],yr[i]] + eta.site[stratum[i],yr[i],site[i]] 
+ logit(Pjuv[i]) <- b0[stratum[i]] + b1.mu*Lat[i] + b2.mu*Long[i] + eta.yr[yr[i]] +
+                   eta.strat[stratum[i],yr[i]] + eta.site[stratum[i],yr[i],site[i]] 
 
 
  # 2.3.2 compare observed juveniles to predicted juveniles based on above model
@@ -309,9 +296,8 @@ for (t in 1:(n.years)){
  
  for (s in 1:n.strata){ # where i indexes to the maximum number of strata
  for (t in 1:n.years){ # where t indexes to number of years surveyed in each stratum
-    logit(Pjuv.strat[s,t]) <- b0[s] + eta.yr[s,t]
-  # logit(Pjuv.strat[s,t]) <- b0[s] + et.f[t] + ets.f[s,t] # ECM NEW   
- 
+    logit(Pjuv.strat[s,t]) <- b0[s] + eta.yr[s,t] + eta.strat[stratum[i],yr[i]] 
+
  
  f_init[s,t]<-Pjuv.strat[s,t]/(1-Pjuv.strat[s,t])  
  
@@ -370,6 +356,8 @@ for(s in 1:n.strata){
   relAHYf[,s]<- rowSums(marrAHYf[,,s])
   
 }
+
+
 
 
 
@@ -447,8 +435,8 @@ y.sd <- as.vector(apply(y[,2:ncol(y)], 2, sd)) # CS - I changed this to the SD a
 jags.data <- list(n1=n1, y=as.matrix(y[2:ncol(y)]), y.sd=y.sd, # abundance
                   
                   y.sds=y.sds,  
-                  n.years = ncol(marrAHYf)-1, marrAHYfH = marrAHYf, # survival
-                  relAHYfH = relAHYf, n.strata=ncol(relAHYf),
+                  n.years = ncol(marrAHYf)-1, marrAHYf = marrAHYf, # survival
+                  relAHYf = relAHYf, n.strata=ncol(relAHYf),
                   
                   stratum=dat$stratno, 
                   yr=as.numeric(as.factor(dat$year)),  # fecundity
@@ -955,23 +943,23 @@ for(t in 1:n.years){
 # 2.2.1 Define the multinomial likelihood 
 for(s in 1:(n.strata)){
 for (t in 1:(n.years)){
-  marrAHYfH[t,1:(n.years+1),s] ~ dmulti(prAHYfH[t,,s], relAHYfH[t,s]) #band only
+  marrAHYf[t,1:(n.years+1),s] ~ dmulti(prAHYf[t,,s], relAHYf[t,s]) #band only
 }}
 
 # 2.2.2 Define the cell probabilities of the m-array
 # Main diagonal
 for(s in 1:(n.strata)){
 for (t in 1:(n.years)){
-  prAHYfH[t,t,s] <- (1 - anns[s,t]) * rd[s,t]
+  prAHYf[t,t,s] <- (1 - anns[s,t]) * rd[s,t]
 
   # Above main diagonal
   for (j in (t+1):(n.years)){
-    prAHYfH[t,j,s] <- prod(anns[s,t:(j-1)]) * (1-anns[s,j]) * r[s,j]
+    prAHYf[t,j,s] <- prod(anns[s,t:(j-1)]) * (1-anns[s,j]) * r[s,j]
   } #j
 
   # Below main diagonal
   for (j in 1:(t-1)){
-    prAHYfH[t,j,s] <- 0
+    prAHYf[t,j,s] <- 0
   } #j
  } #t
 } #s
@@ -979,7 +967,7 @@ for (t in 1:(n.years)){
 # Last column: probability of non-recovery
 for(s in 1:(n.strata)){
 for (t in 1:(n.years)){
-  prAHYfH[t,n.years+1,s] <- 1-sum(prAHYfH[t,1:n.years,s])
+  prAHYf[t,n.years+1,s] <- 1-sum(prAHYf[t,1:n.years,s])
 } #t
 } #s
 
@@ -1147,8 +1135,8 @@ y.sd <- as.vector(apply(y[,2:ncol(y)], 2, sd)) # CS - I changed this to the SD a
 jags.data <- list(n1=n1, y=as.matrix(y[2:ncol(y)]), y.sd=y.sd, # abundance
                   
                   y.sds=y.sds,  
-                  n.years = ncol(marrAHYf)-1, marrAHYfH = marrAHYf, # survival
-                  relAHYfH = relAHYf, n.strata=ncol(relAHYf),
+                  n.years = ncol(marrAHYf)-1, marrAHYf = marrAHYf, # survival
+                  relAHYf = relAHYf, n.strata=ncol(relAHYf),
                   
                   stratum=dat$stratno, 
                   yr=as.numeric(as.factor(dat$year)),  # fecundity
